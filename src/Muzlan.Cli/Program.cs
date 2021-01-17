@@ -11,15 +11,13 @@ namespace Muzlan.Cli
         {
             var muzlan = new MuzlanClient();
 
-            await muzlan.Authenticate().ConfigureAwait(false);
+            await muzlan.Auth.Authenticate().ConfigureAwait(false);
 
-            Console.WriteLine("Csrf: " + muzlan.CsrfToken);
-            Console.WriteLine("Media: " + muzlan.MediaToken);
+            //var popularArtists = await muzlan.Meta.ListPopularArtists().ConfigureAwait(false);
+            //var recentSearches = await muzlan.Meta.ListRecentSearches().ConfigureAwait(false);
 
-            //var artists = await muzlan.GetPopularArtists().ConfigureAwait(false);
-            //var searches = await muzlan.GetRecentSearches().ConfigureAwait(false);
-            //var searchArtist = await muzlan.SearchArtists("Landser").ConfigureAwait(false);
-            var searchTracks = await muzlan.SearchTracks("Landser").ConfigureAwait(false);
+            var tracks = await muzlan.Search.FindTracks("landser").ConfigureAwait(false);
+            //var artists = await muzlan.Search.FindArtists("landser").ConfigureAwait(false);
 
             Console.ReadLine();
         }

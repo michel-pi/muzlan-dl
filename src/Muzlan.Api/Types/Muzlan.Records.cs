@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace Muzlan.Api
+namespace Muzlan.Api.Types
 {
     public record MuzlanArtist(string Name, Uri ArtistUri, Uri SearchUri, Uri ImageUri);
     public record MuzlanTag(string Name, Uri TagUri);
