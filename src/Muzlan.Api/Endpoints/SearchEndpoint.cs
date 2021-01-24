@@ -10,7 +10,6 @@ using AngleSharp.Dom;
 using AngleSharp.Html.Dom;
 using AngleSharp.Html.Parser;
 
-using Muzlan.Api.Types;
 using Muzlan.Api.Utilities;
 
 namespace Muzlan.Api.Endpoints
@@ -25,96 +24,135 @@ namespace Muzlan.Api.Endpoints
         {
         }
 
-        public async ValueTask<IList<MuzlanTrack>> FindTracks(string query, CancellationToken token = default)
+        public async ValueTask<MuzlanResponse<IList<TrackRecord>>> FindTracks(
+            Uri pageUri,
+            int? limitItems = null,
+            int? limitPages = null,
+            CancellationToken cancellationToken = default)
         {
-            var pagination = new HttpPagination(_baseUri, _client, _parser);
+            var pagination = new MuzlanPagination(pageUri, _client, _parser);
 
-            var tracks = new List<MuzlanTrack>();
+            var tracks = new List<TrackRecord>();
 
-            await foreach (var page in pagination.Follow($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}", token))
+            try
             {
-                await foreach (var track in EnumerateTracks(page, token))
+                bool reachedLimit = false;
+                int itemCount = 0;
+
+                await foreach (var pageContent in pagination.FollowForward(cancellationToken).ConfigureAwait(false))
                 {
-                    tracks.Add(track);
-                }
-            }
+                    reachedLimit = limitPages > 0 && pagination.PageCount >= limitPages;
 
-            return tracks;
-        }
+                    await foreach (var track in EnumerateTracks(pageContent, cancellationToken).ConfigureAwait(false))
+                    {
+                        tracks.Add(track);
 
-        public async ValueTask<IList<MuzlanTrack>> FindTracks(string query, int page, CancellationToken token = default)
-        {
-            var content = await _client.GetStringAsync(
-                $"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}/p/{page}",
-                token).ConfigureAwait(false);
+                        itemCount++;
 
-            if (string.IsNullOrEmpty(content))
-            {
-                throw MuzlanException.ForEmptyResponse();
-            }
+                        reachedLimit = limitItems > 0 && itemCount >= limitItems;
+                    }
 
-            var tracks = new List<MuzlanTrack>();
-
-            await foreach (var track in EnumerateTracks(content, token))
-            {
-                tracks.Add(track);
-            }
-
-            return tracks;
-        }
-
-        public async ValueTask<IList<MuzlanSearchArtist>> FindArtists(string query, CancellationToken token = default)
-        {
-            var content = await _client.GetStringAsync(
-                $"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}",
-                token).ConfigureAwait(false);
-
-            if (string.IsNullOrEmpty(content))
-            {
-                throw MuzlanException.ForEmptyResponse();
-            }
-
-            using var document = await _parser.ParseDocumentAsync(content, token).ConfigureAwait(false);
-
-            var artists = new List<MuzlanSearchArtist>();
-
-            foreach (var artistElement in document.QuerySelectorAll<IHtmlDivElement>("div.page-content div.row-col div.row.item-list:not(#search-result-items)"))
-            {
-                var imageElement = artistElement.QuerySelector<IHtmlAnchorElement>("div.item-media a.item-media-content");
-                var titleElement = artistElement.QuerySelector<IHtmlAnchorElement>("div.item-info div.item-title.text-ellipsis a");
-                var descriptionElement = artistElement.QuerySelector<IHtmlDivElement>("div.item-info div.item-except");
-
-                var artistName = titleElement.Text.Trim();
-                var artistUri = new Uri($"https://{_baseUri.DnsSafeHost}/artist/{Uri.EscapeDataString(query)}");
-                var artistSearchUri = new Uri($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}");
-
-                var match = _bgImageRegex.Match(imageElement.OuterHtml);
-
-                var artistImageUri = new Uri($"https://{_baseUri.DnsSafeHost}{match.Groups[1].Value}");
-
-                var description = string.IsNullOrEmpty(descriptionElement.TextContent)
-                    ? string.Empty
-                    : descriptionElement.TextContent.Trim();
-
-                var tags = new List<MuzlanTag>();
-
-                foreach (var tagElement in artistElement.QuerySelectorAll<IHtmlAnchorElement>("div.item-info div.item-meta a.btn"))
-                {
-                    var tagName = tagElement.Text.Trim();
-                    var tagUri = new Uri($"https://{_baseUri.DnsSafeHost}{tagElement.PathName}");
-
-                    tags.Add(new MuzlanTag(tagName, tagUri));
+                    if (reachedLimit) break;
                 }
 
-                var artist = new MuzlanArtist(artistName, artistUri, artistSearchUri, artistImageUri);
-
-                artists.Add(new MuzlanSearchArtist(artist, tags, description));
+                return MuzlanResponse<IList<TrackRecord>>.FromResult(tracks, pagination.PageUri);
             }
+            catch (Exception ex)
+            {
+                if (pagination.PageNumber == -1)
+                {
+                    return MuzlanResponse<IList<TrackRecord>>.FromException(ex, pagination.PageUri, pagination.PageNumber);
+                }
 
-            return artists;
+                return MuzlanResponse<IList<TrackRecord>>.FromPartialResult(tracks, pagination.PageUri, pagination.PageNumber);
+            }
         }
 
-        private async IAsyncEnumerable<MuzlanTrack> EnumerateTracks(string content, [EnumeratorCancellation] CancellationToken token = default)
+        public ValueTask<MuzlanResponse<IList<TrackRecord>>> FindTracks(
+            string query,
+            int? limitItems = null,
+            int? limitPages = null,
+            CancellationToken cancellationToken = default)
+        {
+            return FindTracks(
+                new Uri($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}"),
+                limitItems,
+                limitPages,
+                cancellationToken);
+        }
+
+        public ValueTask<MuzlanResponse<IList<TrackRecord>>> FindTracks(
+            string query,
+            int page,
+            int? limitItems = null,
+            int? limitPages = null,
+            CancellationToken cancellationToken = default)
+        {
+            return FindTracks(
+                new Uri($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}/p/{page}"),
+                limitItems,
+                limitPages,
+                cancellationToken);
+        }
+
+        public async ValueTask<MuzlanResponse<IList<SearchArtistRecord>>> FindArtists(
+            string query,
+            CancellationToken token = default)
+        {
+            var pageUri = new Uri($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}");
+
+            try
+            {
+                var content = await _client.TryGetStringAsync(
+                    pageUri,
+                    token).ConfigureAwait(false);
+
+                using var document = await _parser.ParseDocumentAsync(content, token).ConfigureAwait(false);
+
+                var artists = new List<SearchArtistRecord>();
+
+                foreach (var artistElement in document.QuerySelectorAll<IHtmlDivElement>("div.page-content div.row-col div.row.item-list:not(#search-result-items)"))
+                {
+                    var imageElement = artistElement.QuerySelector<IHtmlAnchorElement>("div.item-media a.item-media-content");
+                    var titleElement = artistElement.QuerySelector<IHtmlAnchorElement>("div.item-info div.item-title.text-ellipsis a");
+                    var descriptionElement = artistElement.QuerySelector<IHtmlDivElement>("div.item-info div.item-except");
+
+                    var artistName = titleElement.Text.Trim();
+                    var artistUri = new Uri($"https://{_baseUri.DnsSafeHost}/artist/{Uri.EscapeDataString(query)}");
+                    var artistSearchUri = new Uri($"https://{_baseUri.DnsSafeHost}/search/{Uri.EscapeDataString(query)}");
+
+                    var match = _bgImageRegex.Match(imageElement.OuterHtml);
+
+                    var artistImageUri = new Uri($"https://{_baseUri.DnsSafeHost}{match.Groups[1].Value}");
+
+                    var description = string.IsNullOrEmpty(descriptionElement.TextContent)
+                        ? string.Empty
+                        : descriptionElement.TextContent.Trim();
+
+                    var tags = new List<TagRecord>();
+
+                    foreach (var tagElement in artistElement.QuerySelectorAll<IHtmlAnchorElement>("div.item-info div.item-meta a.btn"))
+                    {
+                        var tagName = tagElement.Text.Trim();
+                        var tagUri = new Uri($"https://{_baseUri.DnsSafeHost}{tagElement.PathName}");
+
+                        tags.Add(new TagRecord(tagName, tagUri));
+                    }
+
+                    var artist = new ArtistRecord(artistName, artistUri, artistSearchUri, artistImageUri);
+
+                    artists.Add(new SearchArtistRecord(artist, tags, description));
+                }
+
+                return MuzlanResponse<IList<SearchArtistRecord>>.FromResult(artists, pageUri);
+            }
+            catch (Exception ex)
+            {
+                return MuzlanResponse<IList<SearchArtistRecord>>.FromException(ex, pageUri);
+            }
+        }
+
+        private async IAsyncEnumerable<TrackRecord> EnumerateTracks(string content, [EnumeratorCancellation] CancellationToken token = default)
         {
             using var document = await _parser.ParseDocumentAsync(content, token).ConfigureAwait(false);
 
@@ -132,7 +170,7 @@ namespace Muzlan.Api.Endpoints
 
                 var downloadUri = new Uri($"https://{_baseUri.DnsSafeHost}{trackSource}");
 
-                yield return new MuzlanTrack(
+                yield return new TrackRecord(
                     trackName,
                     artistName,
                     trackUri,

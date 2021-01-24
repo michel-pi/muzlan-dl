@@ -10,7 +10,7 @@ namespace Muzlan.Api.Utilities
         {
             var handler = new HttpClientHandler()
             {
-                AllowAutoRedirect = true,
+                AllowAutoRedirect = false,
                 AutomaticDecompression = DecompressionMethods.All,
                 CookieContainer = new CookieContainer(),
                 UseCookies = true

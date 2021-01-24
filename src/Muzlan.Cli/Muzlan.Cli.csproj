@@ -4,8 +4,14 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net5.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <AssemblyName>muzlan-dl</AssemblyName>
   </PropertyGroup>
 
+	<!--<Target Name="Rename" AfterTargets="AfterBuild">
+		<Copy SourceFiles="$(OUTDIR)\Muzlan.Cli.exe" DestinationFiles="$(OUTDIR)\muzlan-dl.exe" />
+		<Message Text="Renamed executable file." Importance="high" />
+	</Target>-->
+	
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DefineConstants>DEBUG;TRACE</DefineConstants>
   </PropertyGroup>
@@ -14,6 +20,10 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommandLineParser" Version="2.8.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Muzlan.Api\Muzlan.Api.csproj" />

@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 using AngleSharp.Html.Parser;
 
+using Muzlan.Api.Utilities;
+
 namespace Muzlan.Api.Endpoints
 {
     public class AuthEndpoint : MuzlanEndpoint
@@ -16,6 +18,11 @@ namespace Muzlan.Api.Endpoints
             "<meta name=\"csrf-token\" content=\"(.+?)\">",
             RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+        private static readonly Uri _firstServerUri = new Uri("https://s1.muzlan.com/api.php?action=check");
+        private static readonly Uri _secondServerUri = new Uri("https://s2.muzlan.com/api.php?action=check");
+
+        private readonly Uri _mediaTokenUri;
+
         public bool? ServerOnline { get; private set; }
 
         public string? CsrfToken { get; private set; }
@@ -23,99 +30,98 @@ namespace Muzlan.Api.Endpoints
 
         internal AuthEndpoint(Uri baseUri, HttpClient client, HtmlParser parser) : base(baseUri, client, parser)
         {
+            _mediaTokenUri = new Uri($"https://{baseUri.DnsSafeHost}/ajax/get-token");
         }
 
-        public async ValueTask<bool> Authenticate(CancellationToken token = default)
+        public async ValueTask<MuzlanResponse<AuthRecord>> Authenticate(CancellationToken token = default)
         {
             ServerOnline = null;
             CsrfToken = null;
             MediaToken = null;
 
-            var online = await CheckServers(token).ConfigureAwait(false);
+            var pageUri = _firstServerUri;
 
-            ServerOnline = online;
-
-            if (!online)
+            try
             {
-                return false;
+                var online = await CheckServerResponse(pageUri, token).ConfigureAwait(false);
+
+                if (!online)
+                {
+                    pageUri = _secondServerUri;
+
+                    online = await CheckServerResponse(pageUri, token).ConfigureAwait(false);
+
+                    if (!online)
+                    {
+                        ServerOnline = false;
+
+                        throw new HttpRequestException("Authentication servers seem to be unavailable.", null, HttpStatusCode.NoContent);
+                    }
+                }
+
+                ServerOnline = true;
+
+                pageUri = _baseUri;
+
+                CsrfToken = await GetCsrfToken(pageUri, token).ConfigureAwait(false);
+
+                pageUri = _mediaTokenUri;
+
+                MediaToken = await GetMediaToken(pageUri, CsrfToken, token).ConfigureAwait(false);
+
+                return MuzlanResponse<AuthRecord>.FromResult(new AuthRecord(CsrfToken, MediaToken), pageUri);
             }
-
-            await RefreshMediaToken(token).ConfigureAwait(false);
-
-            return !string.IsNullOrEmpty(CsrfToken) && !string.IsNullOrEmpty(MediaToken);
+            catch (Exception ex)
+            {
+                return MuzlanResponse<AuthRecord>.FromException(ex, pageUri);
+            }
         }
 
-        public async ValueTask RefreshMediaToken(CancellationToken token = default)
+        private async ValueTask<string> GetCsrfToken(Uri uri, CancellationToken token = default)
         {
-            string content;
+            var content = await _client.TryGetStringAsync(uri, token).ConfigureAwait(false);
 
-            MediaToken = null;
+            var matchCsrf = _csrfRegex.Match(content);
 
-            if (ServerOnline != true)
+            if (!matchCsrf.Success)
             {
-                throw new InvalidOperationException("Muzlan servers seem to be unavailable or an authorization hasn't been started.");
+                throw new HttpRequestException("Failed to read csrf token from page.", null, HttpStatusCode.Unauthorized);
             }
 
-            if (string.IsNullOrEmpty(CsrfToken))
-            {
-                content = await _client.GetStringAsync(_baseUri, token).ConfigureAwait(false);
+            return matchCsrf.Groups[1].Value;
+        }
 
-                if (string.IsNullOrEmpty(content))
-                {
-                    throw MuzlanException.ForEmptyResponse();
-                }
-
-                var match = _csrfRegex.Match(content);
-
-                if (!match.Success)
-                {
-                    throw new MuzlanException("Failed to find the required csrf token.");
-                }
-
-                CsrfToken = match.Groups[1].Value;
-            }
-
+        private async ValueTask<string> GetMediaToken(Uri uri, string csrfToken, CancellationToken token = default)
+        {
             var formData = new KeyValuePair<string?, string?>[]
             {
-                new KeyValuePair<string?, string?>("_csrf", CsrfToken)
+                new KeyValuePair<string?, string?>("_csrf", csrfToken)
             };
+
             var formContent = new FormUrlEncodedContent(formData);
 
             using var response = await _client.PostAsync(
-                $"https://{_baseUri.DnsSafeHost}/ajax/get-token",
+                uri,
                 formContent,
                 token).ConfigureAwait(false);
 
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                throw new MuzlanException("Failed to get media token for current session.");
-            }
+            response.EnsureSuccessStatusCode();
 
-            content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
 
             if (string.IsNullOrEmpty(content))
             {
-                throw MuzlanException.ForEmptyResponse();
+                throw new HttpRequestException("Media token endpoint did not return any data.", null, HttpStatusCode.NoContent);
             }
 
-            MediaToken = content;
+            return content;
         }
 
-        private async ValueTask<bool> CheckServers(CancellationToken token = default)
-        {
-            var firstTask = CheckServerResponse("https://s1.muzlan.com/api.php?action=check", token).ConfigureAwait(false);
-            var secondTask = CheckServerResponse("https://s2.muzlan.com/api.php?action=check", token).ConfigureAwait(false);
-
-            ServerOnline = await firstTask || await secondTask;
-
-            return ServerOnline.Value;
-        }
-
-        private async ValueTask<bool> CheckServerResponse(string url, CancellationToken token = default)
+        private async ValueTask<bool> CheckServerResponse(Uri url, CancellationToken token = default)
         {
             using var response = await _client.GetAsync(url, token).ConfigureAwait(false);
 
-            if (response.StatusCode != HttpStatusCode.OK) return false;
+            response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
 

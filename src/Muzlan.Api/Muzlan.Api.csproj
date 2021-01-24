@@ -9,7 +9,7 @@
     <Authors>michel-pi</Authors>
     <Description>Client API to interact with muzlan.top</Description>
     <Copyright>Copyright © 2020 michel-pi</Copyright>
-    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageLicenseFile>..\..\LICENSE</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/michel-pi/muzlan-dl</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>muzlan download api client</PackageTags>
@@ -27,13 +27,6 @@
     <DebugSymbols>false</DebugSymbols>
 	<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="..\..\LICENSE">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-    </None>
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AngleSharp" Version="0.14.0" />

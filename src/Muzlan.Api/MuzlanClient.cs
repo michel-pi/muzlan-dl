@@ -16,7 +16,9 @@ namespace Muzlan.Api
 
         public Uri BaseUri { get; }
 
+        public AlbumsEndpoint Albums { get; }
         public AuthEndpoint Auth { get; }
+        public DownloadEndpoint Download { get; }
         public MetaEndpoint Meta { get; }
         public SearchEndpoint Search { get; }
         public SitemapEndpoint Sitemap { get; }
@@ -38,7 +40,9 @@ namespace Muzlan.Api
 
             _parser = new HtmlParser();
 
+            Albums = new AlbumsEndpoint(BaseUri, _client, _parser);
             Auth = new AuthEndpoint(BaseUri, _client, _parser);
+            Download = new DownloadEndpoint(BaseUri, _client, _parser);
             Meta = new MetaEndpoint(BaseUri, _client, _parser);
             Search = new SearchEndpoint(BaseUri, _client, _parser);
             Sitemap = new SitemapEndpoint(BaseUri, _client, _parser);
